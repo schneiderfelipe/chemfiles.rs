@@ -2,10 +2,13 @@
 // Copyright (C) 2015-2020 Guillaume Fraux -- BSD licensed
 use std::convert::TryInto;
 use std::ffi::CStr;
+use std::path::Path;
 
-use chemfiles_sys::{chfl_format_metadata, chfl_formats_list, chfl_free, chfl_guess_format};
+use chemfiles_sys as ffi;
 
 use crate::errors::check_success;
+
+use crate::{errors::check, Error};
 
 /// `FormatMetadata` contains metadata associated with one format.
 #[allow(clippy::struct_excessive_bools)]
@@ -40,7 +43,7 @@ pub struct FormatMetadata {
 }
 
 impl FormatMetadata {
-    pub(crate) fn from_raw(raw: &chfl_format_metadata) -> Self {
+    pub(crate) fn from_raw(raw: &ffi::chfl_format_metadata) -> Self {
         let str_from_ptr = |ptr| unsafe { CStr::from_ptr(ptr).to_str().expect("Invalid Rust str from C") };
         let extension = if raw.extension.is_null() {
             None
@@ -84,12 +87,12 @@ pub fn formats_list() -> Vec<FormatMetadata> {
     let mut formats = std::ptr::null_mut();
     let mut count: u64 = 0;
     let formats_slice = unsafe {
-        check_success(chfl_formats_list(&mut formats, &mut count));
+        check_success(ffi::chfl_formats_list(&mut formats, &mut count));
         std::slice::from_raw_parts(formats, count.try_into().expect("failed to convert u64 to usize"))
     };
     let formats_vec = formats_slice.iter().map(FormatMetadata::from_raw).collect();
     unsafe {
-        let _ = chfl_free(formats as *const _);
+        let _ = ffi::chfl_free(formats as *const _);
     }
     return formats_vec;
 }
@@ -109,23 +112,38 @@ pub fn formats_list() -> Vec<FormatMetadata> {
 /// `Trajectory` constructors, i.e. `"<format name> [/ <compression>]"`, where
 /// compression is optional.
 ///
+/// # Errors
+///
+/// This function returns an error if the file format couldn't be guessed.
+///
+/// # Panics
+///
+/// This function panics if the path can't be converted to a Unicode string.
+///
 /// # Examples
 /// ```
-/// let format = chemfiles::guess_format("trajectory.xyz.xz");
+/// let format = chemfiles::guess_format("trajectory.xyz.xz").unwrap();
 /// assert_eq!(format, "XYZ / XZ");
 ///
-/// let format = chemfiles::guess_format("trajectory.nc");
+/// let format = chemfiles::guess_format("trajectory.nc").unwrap();
 /// assert_eq!(format, "Amber NetCDF");
+///
+/// let format = chemfiles::guess_format("trajectory.unknown.format");
+/// assert!(format.is_err());
 /// ```
-pub fn guess_format(path: &str) -> String {
+pub fn guess_format<P>(path: P) -> Result<String, Error>
+where
+    P: AsRef<Path>,
+{
+    let path = path.as_ref().to_str().expect("couldn't convert path to Unicode");
     let path = crate::strings::to_c(path);
     let mut buffer = vec![0; 128];
     unsafe {
-        check_success(chfl_guess_format(
+        check(ffi::chfl_guess_format(
             path.as_ptr(),
             buffer.as_mut_ptr(),
             buffer.len() as u64,
-        ));
+        ))?;
     }
-    return crate::strings::from_c(buffer.as_ptr());
+    Ok(crate::strings::from_c(buffer.as_ptr()))
 }

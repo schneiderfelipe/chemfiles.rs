@@ -2,7 +2,7 @@
 // Copyright (C) 2015-2018 Guillaume Fraux -- BSD licensed
 use std::marker::PhantomData;
 
-use chemfiles_sys::*;
+use chemfiles_sys as ffi;
 
 use crate::errors::{check_not_null, check_success};
 use crate::property::{PropertiesIter, Property, RawProperty};
@@ -19,11 +19,13 @@ use crate::strings;
 /// The atom name is usually an unique identifier (`H1`, `C_a`) while the
 /// atom type will be shared between all particles of the same type: `H`,
 /// `Ow`, `CH3`.
+#[derive(Debug)]
 pub struct Atom {
-    handle: *mut CHFL_ATOM,
+    handle: *mut ffi::CHFL_ATOM,
 }
 
 /// An analog to a reference to an atom (`&Atom`)
+#[derive(Debug)]
 pub struct AtomRef<'a> {
     inner: Atom,
     marker: PhantomData<&'a Atom>,
@@ -37,6 +39,7 @@ impl<'a> std::ops::Deref for AtomRef<'a> {
 }
 
 /// An analog to a mutable reference to an atom (`&mut Atom`)
+#[derive(Debug)]
 pub struct AtomMut<'a> {
     inner: Atom,
     marker: PhantomData<&'a mut Atom>,
@@ -58,7 +61,7 @@ impl<'a> std::ops::DerefMut for AtomMut<'a> {
 impl Clone for Atom {
     fn clone(&self) -> Atom {
         unsafe {
-            let new_handle = chfl_atom_copy(self.as_ptr());
+            let new_handle = ffi::chfl_atom_copy(self.as_ptr());
             Atom::from_ptr(new_handle)
         }
     }
@@ -70,7 +73,7 @@ impl Atom {
     /// This function is unsafe because no validity check is made on the
     /// pointer.
     #[inline]
-    pub(crate) unsafe fn from_ptr(ptr: *mut CHFL_ATOM) -> Atom {
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::CHFL_ATOM) -> Atom {
         check_not_null(ptr);
         Atom { handle: ptr }
     }
@@ -80,9 +83,10 @@ impl Atom {
     /// This function is unsafe because no validity check is made on the
     /// pointer, and the caller is responsible for setting the right lifetime
     #[inline]
-    pub(crate) unsafe fn ref_from_ptr<'a>(ptr: *const CHFL_ATOM) -> AtomRef<'a> {
+    #[allow(clippy::ptr_cast_constness)]
+    pub(crate) unsafe fn ref_from_ptr<'a>(ptr: *const ffi::CHFL_ATOM) -> AtomRef<'a> {
         AtomRef {
-            inner: Atom::from_ptr(ptr as *mut CHFL_ATOM),
+            inner: Atom::from_ptr(ptr as *mut ffi::CHFL_ATOM),
             marker: PhantomData,
         }
     }
@@ -92,7 +96,7 @@ impl Atom {
     /// This function is unsafe because no validity check is made on the
     /// pointer, and the caller is responsible for setting the right lifetime
     #[inline]
-    pub(crate) unsafe fn ref_mut_from_ptr<'a>(ptr: *mut CHFL_ATOM) -> AtomMut<'a> {
+    pub(crate) unsafe fn ref_mut_from_ptr<'a>(ptr: *mut ffi::CHFL_ATOM) -> AtomMut<'a> {
         AtomMut {
             inner: Atom::from_ptr(ptr),
             marker: PhantomData,
@@ -101,13 +105,13 @@ impl Atom {
 
     /// Get the underlying C pointer as a const pointer.
     #[inline]
-    pub(crate) fn as_ptr(&self) -> *const CHFL_ATOM {
+    pub(crate) fn as_ptr(&self) -> *const ffi::CHFL_ATOM {
         self.handle
     }
 
     /// Get the underlying C pointer as a mutable pointer.
     #[inline]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut CHFL_ATOM {
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::CHFL_ATOM {
         self.handle
     }
 
@@ -122,7 +126,7 @@ impl Atom {
     pub fn new<'a>(name: impl Into<&'a str>) -> Atom {
         let buffer = strings::to_c(name.into());
         unsafe {
-            let handle = chfl_atom(buffer.as_ptr());
+            let handle = ffi::chfl_atom(buffer.as_ptr());
             Atom::from_ptr(handle)
         }
     }
@@ -138,7 +142,7 @@ impl Atom {
     pub fn mass(&self) -> f64 {
         let mut mass = 0.0;
         unsafe {
-            check_success(chfl_atom_mass(self.as_ptr(), &mut mass));
+            check_success(ffi::chfl_atom_mass(self.as_ptr(), &mut mass));
         }
         return mass;
     }
@@ -155,7 +159,7 @@ impl Atom {
     /// ```
     pub fn set_mass(&mut self, mass: f64) {
         unsafe {
-            check_success(chfl_atom_set_mass(self.as_mut_ptr(), mass));
+            check_success(ffi::chfl_atom_set_mass(self.as_mut_ptr(), mass));
         }
     }
 
@@ -170,7 +174,7 @@ impl Atom {
     pub fn charge(&self) -> f64 {
         let mut charge = 0.0;
         unsafe {
-            check_success(chfl_atom_charge(self.as_ptr(), &mut charge));
+            check_success(ffi::chfl_atom_charge(self.as_ptr(), &mut charge));
         }
         return charge;
     }
@@ -187,7 +191,7 @@ impl Atom {
     /// ```
     pub fn set_charge(&mut self, charge: f64) {
         unsafe {
-            check_success(chfl_atom_set_charge(self.as_mut_ptr(), charge));
+            check_success(ffi::chfl_atom_set_charge(self.as_mut_ptr(), charge));
         }
     }
 
@@ -200,7 +204,7 @@ impl Atom {
     /// assert_eq!(atom.name(), "He");
     /// ```
     pub fn name(&self) -> String {
-        let get_name = |ptr, len| unsafe { chfl_atom_name(self.as_ptr(), ptr, len) };
+        let get_name = |ptr, len| unsafe { ffi::chfl_atom_name(self.as_ptr(), ptr, len) };
         let name = strings::call_autogrow_buffer(10, get_name).expect("getting name failed");
         return strings::from_c(name.as_ptr());
     }
@@ -214,7 +218,7 @@ impl Atom {
     /// assert_eq!(atom.atomic_type(), "He");
     /// ```
     pub fn atomic_type(&self) -> String {
-        let get_type = |ptr, len| unsafe { chfl_atom_type(self.as_ptr(), ptr, len) };
+        let get_type = |ptr, len| unsafe { ffi::chfl_atom_type(self.as_ptr(), ptr, len) };
         let buffer = strings::call_autogrow_buffer(10, get_type).expect("getting type failed");
         return strings::from_c(buffer.as_ptr());
     }
@@ -232,7 +236,7 @@ impl Atom {
     pub fn set_name<'a>(&mut self, name: impl Into<&'a str>) {
         let buffer = strings::to_c(name.into());
         unsafe {
-            check_success(chfl_atom_set_name(self.as_mut_ptr(), buffer.as_ptr()));
+            check_success(ffi::chfl_atom_set_name(self.as_mut_ptr(), buffer.as_ptr()));
         }
     }
 
@@ -249,7 +253,7 @@ impl Atom {
     pub fn set_atomic_type<'a>(&mut self, atomic_type: impl Into<&'a str>) {
         let buffer = strings::to_c(atomic_type.into());
         unsafe {
-            check_success(chfl_atom_set_type(self.as_mut_ptr(), buffer.as_ptr()));
+            check_success(ffi::chfl_atom_set_type(self.as_mut_ptr(), buffer.as_ptr()));
         }
     }
 
@@ -264,7 +268,7 @@ impl Atom {
     /// assert_eq!(atom.full_name(), "Zinc");
     /// ```
     pub fn full_name(&self) -> String {
-        let get_full_name = |ptr, len| unsafe { chfl_atom_full_name(self.as_ptr(), ptr, len) };
+        let get_full_name = |ptr, len| unsafe { ffi::chfl_atom_full_name(self.as_ptr(), ptr, len) };
         let name = strings::call_autogrow_buffer(10, get_full_name).expect("getting full name failed");
         return strings::from_c(name.as_ptr());
     }
@@ -281,7 +285,7 @@ impl Atom {
     pub fn vdw_radius(&self) -> f64 {
         let mut radius: f64 = 0.0;
         unsafe {
-            check_success(chfl_atom_vdw_radius(self.as_ptr(), &mut radius));
+            check_success(ffi::chfl_atom_vdw_radius(self.as_ptr(), &mut radius));
         }
         return radius;
     }
@@ -298,7 +302,7 @@ impl Atom {
     pub fn covalent_radius(&self) -> f64 {
         let mut radius: f64 = 0.0;
         unsafe {
-            check_success(chfl_atom_covalent_radius(self.as_ptr(), &mut radius));
+            check_success(ffi::chfl_atom_covalent_radius(self.as_ptr(), &mut radius));
         }
         return radius;
     }
@@ -315,7 +319,7 @@ impl Atom {
     pub fn atomic_number(&self) -> u64 {
         let mut number = 0;
         unsafe {
-            check_success(chfl_atom_atomic_number(self.as_ptr(), &mut number));
+            check_success(ffi::chfl_atom_atomic_number(self.as_ptr(), &mut number));
         }
         return number;
     }
@@ -339,7 +343,7 @@ impl Atom {
         let buffer = strings::to_c(name);
         let property = property.into().as_raw();
         unsafe {
-            check_success(chfl_atom_set_property(
+            check_success(ffi::chfl_atom_set_property(
                 self.as_mut_ptr(),
                 buffer.as_ptr(),
                 property.as_ptr(),
@@ -361,7 +365,7 @@ impl Atom {
     pub fn get(&self, name: &str) -> Option<Property> {
         let buffer = strings::to_c(name);
         unsafe {
-            let handle = chfl_atom_get_property(self.as_ptr(), buffer.as_ptr());
+            let handle = ffi::chfl_atom_get_property(self.as_ptr(), buffer.as_ptr());
             if handle.is_null() {
                 None
             } else {
@@ -392,14 +396,18 @@ impl Atom {
     pub fn properties(&self) -> PropertiesIter {
         let mut count = 0;
         unsafe {
-            check_success(chfl_atom_properties_count(self.as_ptr(), &mut count));
+            check_success(ffi::chfl_atom_properties_count(self.as_ptr(), &mut count));
         }
 
         #[allow(clippy::cast_possible_truncation)]
         let size = count as usize;
         let mut c_names = vec![std::ptr::null_mut(); size];
         unsafe {
-            check_success(chfl_atom_list_properties(self.as_ptr(), c_names.as_mut_ptr(), count));
+            check_success(ffi::chfl_atom_list_properties(
+                self.as_ptr(),
+                c_names.as_mut_ptr(),
+                count,
+            ));
         }
 
         let mut names = Vec::new();
@@ -417,7 +425,7 @@ impl Atom {
 impl Drop for Atom {
     fn drop(&mut self) {
         unsafe {
-            let _ = chfl_free(self.as_ptr().cast());
+            let _ = ffi::chfl_free(self.as_ptr().cast());
         }
     }
 }

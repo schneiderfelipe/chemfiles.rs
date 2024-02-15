@@ -1,6 +1,6 @@
 // Chemfiles, a modern library for chemistry file reading and writing
 // Copyright (C) 2015-2018 Guillaume Fraux -- BSD licensed
-use chemfiles_sys::*;
+use chemfiles_sys as ffi;
 
 use crate::errors::{check, check_not_null, check_success, Error, Status};
 use crate::frame::Frame;
@@ -97,14 +97,15 @@ impl<'a> IntoIterator for &'a Match {
 /// Each basic operation follows the `<selector>[(<variable>)] <operator>
 /// <value>` structure, where `<operator>` is a comparison operator in
 /// `== != < <= > >=`.
+#[derive(Debug)]
 pub struct Selection {
-    handle: *mut CHFL_SELECTION,
+    handle: *mut ffi::CHFL_SELECTION,
 }
 
 impl Clone for Selection {
     fn clone(&self) -> Selection {
         unsafe {
-            let new_handle = chfl_selection_copy(self.as_ptr());
+            let new_handle = ffi::chfl_selection_copy(self.as_ptr());
             Selection::from_ptr(new_handle)
         }
     }
@@ -113,7 +114,7 @@ impl Clone for Selection {
 impl Drop for Selection {
     fn drop(&mut self) {
         unsafe {
-            let _ = chfl_free(self.as_ptr().cast());
+            let _ = ffi::chfl_free(self.as_ptr().cast());
         }
     }
 }
@@ -123,20 +124,20 @@ impl Selection {
     ///
     /// This function is unsafe because no validity check is made on the pointer.
     #[inline]
-    pub(crate) unsafe fn from_ptr(ptr: *mut CHFL_SELECTION) -> Selection {
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::CHFL_SELECTION) -> Selection {
         check_not_null(ptr);
         Selection { handle: ptr }
     }
 
     /// Get the underlying C pointer as a const pointer.
     #[inline]
-    pub(crate) fn as_ptr(&self) -> *const CHFL_SELECTION {
+    pub(crate) fn as_ptr(&self) -> *const ffi::CHFL_SELECTION {
         self.handle
     }
 
     /// Get the underlying C pointer as a mutable pointer.
     #[inline]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut CHFL_SELECTION {
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::CHFL_SELECTION {
         self.handle
     }
 
@@ -154,7 +155,7 @@ impl Selection {
     pub fn new<'a, S: Into<&'a str>>(selection: S) -> Result<Selection, Error> {
         let buffer = strings::to_c(selection.into());
         unsafe {
-            let handle = chfl_selection(buffer.as_ptr());
+            let handle = ffi::chfl_selection(buffer.as_ptr());
             if handle.is_null() {
                 Err(Error {
                     status: Status::SelectionError,
@@ -182,7 +183,7 @@ impl Selection {
     pub fn size(&self) -> usize {
         let mut size = 0;
         unsafe {
-            check_success(chfl_selection_size(self.as_ptr(), &mut size));
+            check_success(ffi::chfl_selection_size(self.as_ptr(), &mut size));
         }
         #[allow(clippy::cast_possible_truncation)]
         return size as usize;
@@ -197,7 +198,7 @@ impl Selection {
     /// assert_eq!(selection.string(), "name H");
     /// ```
     pub fn string(&self) -> String {
-        let get_string = |ptr, len| unsafe { chfl_selection_string(self.as_ptr(), ptr, len) };
+        let get_string = |ptr, len| unsafe { ffi::chfl_selection_string(self.as_ptr(), ptr, len) };
         let selection = strings::call_autogrow_buffer(1024, get_string).expect("failed to get selection string");
         return strings::from_c(selection.as_ptr());
     }
@@ -230,15 +231,23 @@ impl Selection {
         #![allow(clippy::cast_possible_truncation)]
         let mut count = 0;
         unsafe {
-            check(chfl_selection_evaluate(self.as_mut_ptr(), frame.as_ptr(), &mut count))
-                .expect("failed to evaluate selection");
+            check(ffi::chfl_selection_evaluate(
+                self.as_mut_ptr(),
+                frame.as_ptr(),
+                &mut count,
+            ))
+            .expect("failed to evaluate selection");
         }
 
         let size = count as usize;
-        let mut chfl_matches = vec![chfl_match { size: 0, atoms: [0; 4] }; size];
+        let mut chfl_matches = vec![ffi::chfl_match { size: 0, atoms: [0; 4] }; size];
         unsafe {
-            check(chfl_selection_matches(self.handle, chfl_matches.as_mut_ptr(), count))
-                .expect("failed to extract matches");
+            check(ffi::chfl_selection_matches(
+                self.handle,
+                chfl_matches.as_mut_ptr(),
+                count,
+            ))
+            .expect("failed to extract matches");
         }
 
         return chfl_matches
@@ -278,10 +287,11 @@ impl Selection {
     /// assert_eq!(matches[1], 2);
     /// ```
     pub fn list(&mut self, frame: &Frame) -> Vec<usize> {
-        if self.size() != 1 {
-            panic!("can not call `Selection::list` on a multiple selection");
-        }
-        return self.evaluate(frame).into_iter().map(|m| m[0] as usize).collect();
+        assert!(
+            self.size() == 1,
+            "can not call `Selection::list` on a multiple selection"
+        );
+        return self.evaluate(frame).into_iter().map(|m| m[0]).collect();
     }
 }
 
@@ -338,21 +348,21 @@ mod tests {
             let match_ = Match::new(&[1, 2, 3, 4]);
             assert_eq!(match_.iter().copied().collect::<Vec<usize>>(), vec![1, 2, 3, 4]);
 
-            let v = vec![1, 2, 3, 4];
+            let v = [1, 2, 3, 4];
             for (i, &m) in match_.iter().enumerate() {
                 assert_eq!(v[i], m);
             }
         }
 
         #[test]
-        #[should_panic]
+        #[should_panic(expected = "assertion failed: i < self.len()")]
         fn out_of_bound() {
             let m = Match::new(&[1, 2]);
             let _ = m[2];
         }
 
         #[test]
-        #[should_panic]
+        #[should_panic(expected = "assertion failed: atoms.len() <= 4")]
         fn too_big() {
             let _ = Match::new(&[1, 2, 3, 5, 4]);
         }
@@ -377,6 +387,13 @@ mod tests {
 
         let selection = Selection::new("angles: name(#1) H").unwrap();
         assert_eq!(selection.string(), "angles: name(#1) H");
+    }
+
+    #[test]
+    fn invalid() {
+        let error = Selection::new("foo").unwrap_err();
+        assert_eq!(error.message, "unexpected identifier 'foo' in mathematical expression");
+        assert_eq!(error.status, Status::SelectionError);
     }
 
     #[test]
